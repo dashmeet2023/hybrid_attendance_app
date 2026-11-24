@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../utils/backend_api.dart';
 import '../utils/device_checks.dart'
-    if (dart.library.io) '../utils/device_checks_io.dart' as device;
+    if (dart.library.io) '../utils/device_checks_io.dart'
+    as device;
 import '../utils/portal_store.dart';
 
 String stamp(dynamic value) {
@@ -170,7 +172,10 @@ class _AuthScreenState extends State<AuthScreen> {
       ),
     );
     if (result == null) return;
-    setState(() { busy = true; error = null; });
+    setState(() {
+      busy = true;
+      error = null;
+    });
     try {
       await BackendApi.setServerUrl(result['url'].toString());
       await widget.store.initialize();
@@ -180,6 +185,7 @@ class _AuthScreenState extends State<AuthScreen> {
       if (mounted) setState(() => busy = false);
     }
   }
+
   Future<void> submit() async {
     final fields = <FieldSpec>[
       if (mode == 'setup')
@@ -278,12 +284,9 @@ class _AuthScreenState extends State<AuthScreen> {
                   Text(title, style: Theme.of(context).textTheme.titleLarge),
                   const SizedBox(height: 12),
                   Text(switch (mode) {
-                    'setup' =>
-                      'Create the first administrator using ADMIN_SETUP_TOKEN. Local setup token: .tools/setup-token.txt.',
-                    'register' =>
-                      'Students can register. Teachers and additional administrators need a one-time invitation from an administrator.',
-                    'reset' =>
-                      'Ask your administrator for a one-time password reset token. Tokens expire after one hour.',
+                    'setup' => 'Create the first administrator using ADMIN_SETUP_TOKEN. Local setup token: .tools/setup-token.txt.',
+                    'register' => 'Students can register. Teachers and additional administrators need a one-time invitation from an administrator.',
+                    'reset' => 'Ask your administrator for a one-time password reset token. Tokens expire after one hour.',
                     _ => 'Your account determines your role and course access.',
                   }),
                   if (error != null || widget.store.error != null)
@@ -410,9 +413,8 @@ class _PortalScreenState extends State<PortalScreen> {
       await action();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(e.toString())));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString())));
       }
     } finally {
       if (mounted) setState(() => busy = false);
@@ -457,6 +459,11 @@ class _PortalScreenState extends State<PortalScreen> {
       );
     }
   }
+
+  Map<String, String> studentOptions() => {
+    for (final u in store.list('users').where((u) => u['role'] == 'student'))
+      '${u['id']}': '${u['name']} · ${u['roll_no'] ?? ''} · ${u['email']}',
+  };
 
   Future<bool> confirm(String text) async =>
       await dialog<bool>(
@@ -683,9 +690,10 @@ class _PortalScreenState extends State<PortalScreen> {
     await dialog<void>(
       (context) => AlertDialog(
         title: Text(switch (outcome) {
-          'VERIFIED' => result['duplicate'] == true
-              ? 'Attendance already recorded'
-              : 'Attendance successful',
+          'VERIFIED' =>
+            result['duplicate'] == true
+                ? 'Attendance already recorded'
+                : 'Attendance successful',
           'PENDING' => 'Verification pending',
           _ => 'Attendance rejected',
         }),
@@ -953,7 +961,9 @@ class _PortalScreenState extends State<PortalScreen> {
       for (final session in store.list('sessions'))
         panel(courseName(session['course_id']), [
           Text('${stamp(session['starts_at'])} → ${stamp(session['ends_at'])}'),
-          Text('Status: ${session['status']} · Checks: ${requirements(session)}'),
+          Text(
+            'Status: ${session['status']} · Checks: ${requirements(session)}',
+          ),
           if (!student && session['csi_required'] == 1) roomStatus(session),
           const SizedBox(height: 12),
           if (session['status'] == 'open') ...[
@@ -994,7 +1004,11 @@ class _PortalScreenState extends State<PortalScreen> {
                 ),
               )
             else
-              button('Check in', () => checkIn(session), icon: Icons.how_to_reg),
+              button(
+                'Check in',
+                () => checkIn(session),
+                icon: Icons.how_to_reg,
+              ),
           ],
           if (!student) attempts(session),
         ]),
@@ -1040,7 +1054,9 @@ class _PortalScreenState extends State<PortalScreen> {
     final failed = rows.where((c) => c['outcome'] != 'VERIFIED').length;
     return ExpansionTile(
       tilePadding: EdgeInsets.zero,
-      title: Text('Verification attempts (${rows.length}, $failed not verified)'),
+      title: Text(
+        'Verification attempts (${rows.length}, $failed not verified)',
+      ),
       children: [
         for (final c in rows)
           ListTile(
@@ -1183,74 +1199,76 @@ class _PortalScreenState extends State<PortalScreen> {
   Widget devicePage() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      panel(device.nativeChecksSupported ? 'Phone registration' : 'Browser approval', [
-        Text(
-          device.nativeChecksSupported
-              ? 'This phone is registered with a secure app ID (changes if the app is reinstalled) and a device fingerprint derived from Android\'s app-scoped device ID. One approved device per student; a phone cannot be registered to two students. Replacing a phone needs administrator approval.'
-              : 'Approval is tied to this browser’s secure cookie. Clearing cookies or switching browsers requires a new approval. An administrator can approve one browser per student at a time. This does not identify physical hardware. Sessions that check the classroom Wi-Fi need the Android app.',
-        ),
-        if (student) ...[
-          const SizedBox(height: 12),
-          button(
+      panel(
+        device.nativeChecksSupported
+            ? 'Phone registration'
+            : 'Browser approval',
+        [
+          Text(
             device.nativeChecksSupported
-                ? 'Register this phone'
-                : 'Request approval for this browser',
-            () async {
-              final identity = await device.deviceIdentity();
-              await actionForm('Describe this device', 'devices/request', [
-                FieldSpec(
-                  'label',
-                  'Example: My phone · Chrome',
-                  initial: '${identity['model'] ?? ''}',
-                ),
-              ], identity);
-            },
+                ? 'This phone is registered with a secure app ID (changes if the app is reinstalled) and a device fingerprint derived from Android\'s app-scoped device ID. One approved device per student; a phone cannot be registered to two students. Replacing a phone needs administrator approval.'
+                : 'Approval is tied to this browser’s secure cookie. Clearing cookies or switching browsers requires a new approval. An administrator can approve one browser per student at a time. This does not identify physical hardware. Sessions that check the classroom Wi-Fi need the Android app.',
           ),
+          if (student) ...[
+            const SizedBox(height: 12),
+            button(
+              device.nativeChecksSupported
+                  ? 'Register this phone'
+                  : 'Request approval for this browser',
+              () async {
+                final identity = await device.deviceIdentity();
+                await actionForm('Describe this device', 'devices/request', [
+                  FieldSpec(
+                    'label',
+                    'Example: My phone · Chrome',
+                    initial: '${identity['model'] ?? ''}',
+                  ),
+                ], identity);
+              },
+            ),
+          ],
         ],
-      ]),
+      ),
       if (store.list('devices').isEmpty) empty('No browser approval requests.'),
       for (final device in store.list('devices'))
-        panel(
-          '${device['label']} ${device['id'] == store.state['current_device_id'] ? (kIsWeb ? '· This browser' : '· This device') : ''}',
-          [
-            Text('${device['name']} · ${device['email']}'),
-            Text(
-              'Status: ${device['status']} · Requested ${stamp(device['created_at'])}'
-              '${device['platform'] != null ? ' · ${device['platform']} app (${device['model']})' : ' · browser'}',
+        panel('${device['label']} ${device['id'] == store.state['current_device_id'] ? (kIsWeb ? '· This browser' : '· This device') : ''}', [
+          Text('${device['name']} · ${device['email']}'),
+          Text(
+            'Status: ${device['status']} · Requested ${stamp(device['created_at'])}'
+            '${device['platform'] != null ? ' · ${device['platform']} app (${device['model']})' : ' · browser'}',
+          ),
+          if (admin) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                for (final status in [
+                  if (device['status'] != 'approved') 'approved',
+                  if (device['status'] == 'pending') 'rejected',
+                  if (device['status'] == 'approved') 'revoked',
+                ])
+                  button(
+                    switch (status) {
+                      'approved' => 'Approve',
+                      'rejected' => 'Reject',
+                      _ => 'Revoke',
+                    },
+                    () async {
+                      if (await confirm(
+                        'Set this device to $status? Approving it revokes any other approved device for this student.',
+                      )) {
+                        await store.mutate('devices/review', {
+                          'device_id': device['id'],
+                          'status': status,
+                        });
+                      }
+                    },
+                  ),
+              ],
             ),
-            if (admin) ...[
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                children: [
-                  for (final status in [
-                    if (device['status'] != 'approved') 'approved',
-                    if (device['status'] == 'pending') 'rejected',
-                    if (device['status'] == 'approved') 'revoked',
-                  ])
-                    button(
-                      switch (status) {
-                        'approved' => 'Approve',
-                        'rejected' => 'Reject',
-                        _ => 'Revoke',
-                      },
-                      () async {
-                        if (await confirm(
-                          'Set this device to $status? Approving it revokes any other approved device for this student.',
-                        )) {
-                          await store.mutate('devices/review', {
-                            'device_id': device['id'],
-                            'status': status,
-                          });
-                        }
-                      },
-                    ),
-                ],
-              ),
-            ],
           ],
-        ),
+        ]),
     ],
   );
 
@@ -1331,6 +1349,77 @@ class _PortalScreenState extends State<PortalScreen> {
                           }),
                   )
                 : null,
+          ),
+      ]),
+      panel('NFC cards', [
+        const Text(
+          'Students tap their card on the classroom reader (ESP32-C3 + PN532 on the room\'s Pi, using that room\'s sensor token). '
+          'A new card appears here after its first tap; assign it to a student. The tap marks the student present in the open session for that room. '
+          'If the session requires the CSI check, the room sensor must also report PRESENT.',
+        ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: button(
+            'Add card by UID',
+            () => actionForm('Add NFC card', 'nfc/cards/assign', [
+              const FieldSpec('uid', 'Card UID, e.g. 04A1B2C3D4E5F6'),
+              FieldSpec('student_id', 'Student', options: studentOptions()),
+            ]),
+            icon: Icons.nfc,
+          ),
+        ),
+        for (final card in store.list('nfc_cards'))
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(
+              '${card['uid']} · ${card['student_id'] == null ? 'Unassigned' : '${card['name']} (${card['email']})'}',
+            ),
+            subtitle: Text(
+              '${card['active'] == 1 ? 'Active' : 'Revoked'} · '
+              '${card['last_seen_at'] != null ? 'Last tap ${stamp(card['last_seen_at'])}${card['last_room'] != null ? ' in ${card['last_room']}' : ''}' : 'Never tapped'}',
+            ),
+            trailing: Wrap(
+              spacing: 4,
+              children: [
+                IconButton(
+                  tooltip: card['student_id'] == null
+                      ? 'Assign to student'
+                      : 'Reassign',
+                  icon: const Icon(Icons.person_add_alt),
+                  onPressed: busy
+                      ? null
+                      : () => actionForm(
+                          'Assign card ${card['uid']}',
+                          'nfc/cards/assign',
+                          [
+                            FieldSpec(
+                              'student_id',
+                              'Student',
+                              options: studentOptions(),
+                            ),
+                          ],
+                          {'card_id': card['id']},
+                        ),
+                ),
+                if (card['active'] == 1 && card['student_id'] != null)
+                  IconButton(
+                    tooltip: 'Revoke card',
+                    icon: const Icon(Icons.block),
+                    onPressed: busy
+                        ? null
+                        : () => run(() async {
+                            if (await confirm(
+                              'Revoke card ${card['uid']}? It will no longer mark attendance.',
+                            )) {
+                              await store.mutate('nfc/cards/revoke', {
+                                'card_id': card['id'],
+                              });
+                            }
+                          }),
+                  ),
+              ],
+            ),
           ),
       ]),
       panel('Accounts', [

@@ -20,6 +20,7 @@ from .database import (users, auth_sessions, invites, courses, enrollments,
     class_sessions, session_roster, devices, attendance, notices, audit, attempts,
     session_policy, device_identity, csi_sensors, attendance_checks)
 from . import verification as verify
+from . import nfc
 
 PASSWORDS = PasswordHasher()
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -257,6 +258,8 @@ class Service:
             roster = rows(conn, roster_query)
             dev_query = select(devices.c.id, devices.c.user_id, devices.c.label, devices.c.status,
                 devices.c.created_at, users.c.name, users.c.email).join(users, users.c.id == devices.c.user_id)
+            # NFC cards have their own device records (status 'card'); they are listed under NFC cards.
+            dev_query = dev_query.where(devices.c.status != 'card')
             if user['role'] != 'admin':
                 dev_query = dev_query.where(devices.c.user_id == user['id'])
             dev_query = dev_query.add_columns(device_identity.c.platform, device_identity.c.model).outerjoin(
@@ -288,6 +291,7 @@ class Service:
                 campus_network_available=bool(os.getenv('CAMPUS_CIDRS')),
                 checks=check_rows, csi_rooms=verify.room_status(conn, rooms), csi_sensors=sensors,
                 attendance_ssid=verify.default_ssid(),
+                nfc_cards=nfc.card_list(conn) if user['role'] == 'admin' else [],
                 server_time=time.time())
 
     def reports(self, conn, user):
@@ -523,6 +527,9 @@ class Service:
                 if conn.execute(update(csi_sensors).where(csi_sensors.c.id == sensor_id).values(active=0)).rowcount != 1:
                     raise ApiError('Sensor not found', 404)
                 log(conn, user['id'], 'csi_sensor_revoked', sensor_id)
+            elif action in ('nfc/cards/assign', 'nfc/cards/revoke'):
+                self.require(user, 'admin')
+                return (nfc.assign(conn, user, data) if action.endswith('assign') else nfc.revoke(conn, user, data)), None
             elif action == 'notices':
                 course = self.course(conn, user, field(data, 'course_id', 40), True)
                 conn.execute(insert(notices).values(id=uid(), course_id=course['id'], body=field(data, 'body', 1000), created_at=time.time()))

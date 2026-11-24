@@ -155,6 +155,17 @@ attendance_checks = table('attendance_checks_v3',
     Column('csi_reading_id', String(40)),
     Column('wifi_ssid', String(64)),
     Column('created_at', Float, nullable=False))
+# --- v4: NFC cards tapped on a room reader (ESP32-C3 + PN532 on the room's Pi) ---
+# Unknown cards are stored unassigned so the admin can link them to a student.
+nfc_cards = table('nfc_cards_v4',
+    Column('id', String(40), primary_key=True),
+    Column('uid', String(32), nullable=False, unique=True),
+    Column('student_id', ForeignKey(users.c.id)),
+    Column('device_id', ForeignKey(devices.c.id)),
+    Column('active', Integer, nullable=False, default=1),
+    Column('created_at', Float, nullable=False),
+    Column('last_seen_at', Float),
+    Column('last_room', String(120)))
 
 
 def make_engine(url=None):

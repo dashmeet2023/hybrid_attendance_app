@@ -125,6 +125,13 @@ class Handler(SimpleHTTPRequestHandler):
                 self.service.rate_limit('csi-ip', self.client_ip(), 600, 60)
                 from backend.verification import ingest_reading
                 return self.respond(200, ingest_reading(self.service.engine, token, self.json_body()))
+            if method == 'POST' and path == 'nfc/tap':
+                # Classroom NFC reader host; same per-room bearer token as the CSI sensor.
+                auth = self.headers.get('Authorization', '')
+                token = auth[7:].strip() if auth.lower().startswith('bearer ') else ''
+                self.service.rate_limit('nfc-ip', self.client_ip(), 600, 60)
+                from backend.nfc import tap
+                return self.respond(200, tap(self.service.engine, token, self.json_body()))
             if method == 'POST':
                 self.check_origin()
                 data = self.json_body()
