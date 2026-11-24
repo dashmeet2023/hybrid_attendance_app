@@ -23,6 +23,23 @@ CSV_FIELDS = ['host_time', 'seq', 'rssi', 'channel', 'noise_floor', 'local_times
 LABELS = ('empty', 'occupied')
 
 
+def request_raw(handle):
+    """Ask the Arduino CSI sketch (firmware/arduino_csi_c3) for CSI_DATA lines.
+
+    Harmless for Espressif's csi_recv_router, which ignores unknown console input.
+    """
+    write = getattr(handle, 'write', None)
+    if write is None:
+        return
+    try:
+        write(b'RAW\n')
+        flush = getattr(handle, 'flush', None)
+        if flush:
+            flush()
+    except Exception:  # never let this break reading
+        pass
+
+
 def serial_lines(port, baud=921600, timeout=1.0, retry_s=2.0, stop=lambda: False, opener=None):
     """Yield (host_time, line) forever, reopening the port after disconnection.
 
@@ -38,13 +55,17 @@ def serial_lines(port, baud=921600, timeout=1.0, retry_s=2.0, stop=lambda: False
         try:
             with opener() as handle:
                 log.info('Opened %s at %d baud', port, baud)
+                request_raw(handle)
                 while not stop():
                     raw = handle.readline()
                     now = time.time()
                     if not raw:
                         yield now, None
                         continue
-                    yield now, raw.decode('ascii', errors='replace')
+                    line = raw.decode('ascii', errors='replace')
+                    if line.startswith('CSI ') and 'pkt/s' in line:
+                        request_raw(handle)  # Arduino sketch is in SUMMARY mode (e.g. after a reset)
+                    yield now, line
         except Exception as error:  # serial.SerialException, OSError on unplug
             log.warning('Serial port %s unavailable (%s); retrying in %.0fs. '
                         'Close idf.py monitor if it is open.', port, error, retry_s)
