@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Hybrid Attendance Kiosk
+Exec=/home/pi/hybrid_attendance_app/nfc/kiosk.sh
+X-GNOME-Autostart-enabled=true

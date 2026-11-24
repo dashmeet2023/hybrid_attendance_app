@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attendance kiosk</title>
+<style>
+  :root { --bg:#0f1a19; --panel:#172524; --text:#eef5f3; --muted:#8fa7a3; --ok:#1f9d6b; --bad:#c2412d; --wait:#c98a12; --info:#2f6fb5; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body { height:100%; background:var(--bg); color:var(--text); font-family:system-ui, "DejaVu Sans", sans-serif;
+               overflow:hidden; user-select:none; cursor:none; }
+  .app { height:100vh; display:flex; flex-direction:column; padding:6px; gap:6px; }
+  .bar { display:flex; align-items:center; gap:8px; font-size:14px; }
+  .room { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:34%; }
+  .clock { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .pill { padding:3px 8px; border-radius:999px; background:var(--panel); white-space:nowrap; font-size:12px; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+  .spacer { flex:1; }
+  button { font:inherit; font-size:14px; font-weight:700; color:var(--text); background:var(--info); border:0;
+           border-radius:10px; padding:10px 14px; min-height:40px; }
+  button:active { filter:brightness(1.3); }
+  .main { flex:1; border-radius:14px; display:flex; flex-direction:column; align-items:center; justify-content:center;
+          text-align:center; padding:10px; background:var(--panel); transition:background .2s; }
+  .main.ok { background:var(--ok); } .main.bad { background:var(--bad); }
+  .main.wait { background:var(--wait); } .main.info { background:var(--info); }
+  .icon { font-size:64px; line-height:1; }
+  .title { font-size:30px; font-weight:800; margin-top:6px; line-height:1.15; }
+  .sub { font-size:16px; margin-top:6px; opacity:.92; line-height:1.3; max-width:95%; }
+  .recent { display:flex; gap:6px; font-size:12px; min-height:34px; }
+  .recent div { flex:1; background:var(--panel); border-radius:8px; padding:4px 6px; overflow:hidden; white-space:nowrap;
+                text-overflow:ellipsis; border-left:4px solid var(--muted); }
+  .recent .ok { border-color:var(--ok); } .recent .bad { border-color:var(--bad); }
+  .recent .wait { border-color:var(--wait); } .recent .info { border-color:var(--info); }
+  .pulse { animation:pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity:.45; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar">
+    <span class="room" id="room">Attendance</span>
+    <span class="clock" id="clock"></span>
+    <span class="spacer"></span>
+    <span class="pill" id="reader"><span class="dot"></span>Reader</span>
+    <span class="pill" id="csi"><span class="dot"></span>Room</span>
+    <button id="web">Website</button>
+  </div>
+  <div class="main" id="main">
+    <div class="icon pulse" id="icon">&#x1F4B3;</div>
+    <div class="title" id="title">Tap your card</div>
+    <div class="sub" id="sub">Hold your ID card on the reader</div>
+  </div>
+  <div class="recent" id="recent"></div>
+</div>
+<script>
+const SHOW_RESULT_S = 6;
+const STYLE = {
+  VERIFIED: ['ok', '✔', 'Present'],
+  PENDING: ['wait', '⏳', 'Please tap again'],
+  REJECTED: ['bad', '✖', 'Not accepted'],
+  UNKNOWN_CARD: ['info', '❓', 'New card'],
+  OFFLINE: ['bad', '⚠', 'Server offline'],
+  ERROR: ['bad', '⚠', 'Error'],
+};
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function setPill(el, color, text) {
+  el.innerHTML = `<span class="dot" style="background:${color}"></span>${esc(text)}`;
+}
+
+function render(s) {
+  $('room').textContent = s.room || 'Attendance';
+  setPill($('reader'), s.reader_connected ? 'var(--ok)' : 'var(--bad)', s.reader_connected ? 'Reader' : 'Reader off');
+  const c = s.csi;
+  if (!c || c.age_s > 10) setPill($('csi'), 'var(--muted)', 'Room: offline');
+  else {
+    const col = c.status === 'PRESENT' ? 'var(--ok)' : c.status === 'ABSENT' ? 'var(--bad)' : 'var(--wait)';
+    const conf = c.confidence != null ? ' ' + Math.round(c.confidence * 100) + '%' : '';
+    setPill($('csi'), col, 'Room: ' + c.status + conf);
+  }
+
+  const last = s.taps[0];
+  const main = $('main');
+  if (last && s.now - last.at < SHOW_RESULT_S) {
+    const [cls, icon, label] = STYLE[last.outcome] || STYLE.ERROR;
+    main.className = 'main ' + cls;
+    $('icon').className = 'icon';
+    $('icon').textContent = icon;
+    $('title').textContent = last.student ? last.student : label;
+    $('sub').textContent = last.outcome === 'VERIFIED' ? label : (last.message || last.uid);
+  } else {
+    main.className = 'main';
+    $('icon').className = 'icon pulse';
+    $('icon').textContent = '\u{1F4B3}';
+    $('title').textContent = s.reader_connected ? 'Tap your card' : 'Reader not connected';
+    $('sub').textContent = s.reader_connected ? 'Hold your ID card on the reader' : 'Check the reader USB cable';
+  }
+
+  $('recent').innerHTML = s.taps.slice(0, 3).map(t => {
+    const [cls] = STYLE[t.outcome] || STYLE.ERROR;
+    const time = new Date(t.at * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    return `<div class="${cls}">${esc(time)} ${esc(t.student || t.uid)}</div>`;
+  }).join('');
+}
+
+async function poll() {
+  try {
+    const r = await fetch('/status', {cache: 'no-store'});
+    render(await r.json());
+  } catch (e) {
+    $('title').textContent = 'Kiosk service stopped';
+    $('sub').textContent = 'Restart the Pi or run nfc/kiosk.sh';
+  }
+}
+
+$('web').onclick = () => fetch('/open-website', {method: 'POST'}).catch(() => {});
+setInterval(() => { $('clock').textContent = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }, 1000);
+setInterval(poll, 500);
+poll();
+</script>
+</body>
+</html>

@@ -98,7 +98,20 @@ def load_env(path):
             os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-def run(detector, frame_source, poster, interval, session_id=None, source=None, stop=lambda: False):
+def write_status(path, payload):
+    """Latest result for local displays (the Pi touchscreen kiosk). Never fails the service."""
+    if not path:
+        return
+    try:
+        import json
+        tmp = Path(str(path) + '.tmp')
+        tmp.write_text(json.dumps({**payload, 'written_at': time.time()}))
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def run(detector, frame_source, poster, interval, session_id=None, source=None, stop=lambda: False, status_path=None):
     next_report = None
     for now, frame in frame_source:
         if frame is not None:
@@ -111,6 +124,7 @@ def run(detector, frame_source, poster, interval, session_id=None, source=None, 
             result = detector.evaluate(now)
             payload = result.payload(session_id, source)
             log.info('%s conf=%s packets=%d %s', result.status, payload.get('confidence'), result.packets, result.error or '')
+            write_status(status_path, payload)
             if poster:
                 poster.submit(payload)
             else:
@@ -176,7 +190,8 @@ def main(argv=None):
     else:
         source, tag = frames_from_lines(serial_lines(args.port, args.baud)), None
     try:
-        run(detector, source, poster, args.interval, args.session_id, tag)
+        run(detector, source, poster, args.interval, args.session_id, tag,
+            status_path=Path(args.log).parent / 'latest.json')
     except KeyboardInterrupt:
         pass
     finally:
