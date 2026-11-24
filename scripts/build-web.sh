@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-python3 -c 'import sqlalchemy, psycopg, argon2, dotenv' 2>/dev/null || python3 -m pip install --break-system-packages -r requirements.txt
-python3 -m backend.manage migrate
+# Python dependencies are installed by Vercel for the function runtime; the API
+# creates/updates its database schema on first start (see api/index.py).
 # Pin the SDK for repeatable builds; only official Flutter sources are used.
 FLUTTER_VERSION=3.47.9
 if ! command -v flutter >/dev/null 2>&1; then
