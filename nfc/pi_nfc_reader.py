@@ -158,19 +158,34 @@ def close_website_window():
 
 
 def open_website_window():
+    """Open the live website in its own window (maximized, under the taskbar). Returns (ok, message)."""
+    import shutil
     url = STATE.backend
     profile = Path.home() / ".config" / WEBSITE_PROFILE
-    for browser in ("chromium", "chromium-browser"):
-        try:
-            subprocess.Popen([browser, f"--user-data-dir={profile}", "--kiosk", "--noerrdialogs",
-                              "--disable-session-crashed-bubble", url],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-            # Return to the kiosk automatically after 3 minutes.
-            threading.Timer(180, close_website_window).start()
-            return True
-        except FileNotFoundError:
+    profile.mkdir(parents=True, exist_ok=True)
+    if not (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
+        print("[website] no desktop session in this process (started over SSH?) - cannot open a window", flush=True)
+        return False, "Start the kiosk from the desktop (reboot)"
+    close_website_window()
+    for browser in ("chromium", "chromium-browser", "firefox"):
+        path = shutil.which(browser)
+        if not path:
             continue
-    return False
+        if browser == "firefox":
+            # Separate Firefox instance with its own profile, so a card tap can close just this window.
+            cmd = [path, "--no-remote", "--new-instance", "--profile", str(profile), url]
+        else:
+            cmd = [path, f"--user-data-dir={profile}", "--start-maximized", "--noerrdialogs",
+                   "--disable-session-crashed-bubble", f"--app={url}"]
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        print(f"[website] opened {url} with {browser}", flush=True)
+        # Return to the kiosk automatically after 5 minutes.
+        timer = threading.Timer(300, close_website_window)
+        timer.daemon = True
+        timer.start()
+        return True, f"Opening website ({browser})"
+    print("[website] no browser found (install chromium or firefox)", flush=True)
+    return False, "No web browser installed"
 
 
 def on_card(ser, server, uid):
@@ -252,8 +267,8 @@ class KioskHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/open-website":
-            ok = open_website_window()
-            return self.reply(200 if ok else 500, json.dumps({"opened": ok}), "application/json")
+            ok, message = open_website_window()
+            return self.reply(200 if ok else 500, json.dumps({"opened": ok, "message": message}), "application/json")
         self.reply(404, "not found", "text/plain")
 
 

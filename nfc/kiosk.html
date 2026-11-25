@@ -114,7 +114,16 @@ async function poll() {
   }
 }
 
-$('web').onclick = () => fetch('/open-website', {method: 'POST'}).catch(() => {});
+$('web').onclick = async () => {
+  const b = $('web');
+  b.textContent = 'Opening\u2026';
+  try {
+    const r = await fetch('/open-website', {method: 'POST'});
+    const d = await r.json();
+    b.textContent = d.opened ? 'Opened' : (d.message || 'Failed');
+  } catch (e) { b.textContent = 'Failed'; }
+  setTimeout(() => { b.textContent = 'Website'; }, 4000);
+};
 setInterval(() => { $('clock').textContent = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }, 1000);
 setInterval(poll, 500);
 poll();
