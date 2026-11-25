@@ -21,21 +21,35 @@ for i in $(seq 1 30); do
 done
 xset s off -dpms 2>/dev/null   # keep the screen on (X11); harmless on Wayland
 
-# Rotate the 3.5" LCD (SPI-1) to landscape and mirror it on the HDMI monitor: the monitor runs at
-# 720x480 with scale 1.5 (= 480x320, same shape) at the same position, so both show the same picture.
-# Change SCREEN_TRANSFORM in csi/.env (90 or 270) if the picture is upside down.
+# Screen layout: the kiosk runs on the 3.5" LCD (SPI-1, rotated to landscape) and the HDMI monitor shows a
+# live full-screen copy of it (wl-mirror; install once: sudo apt install -y wl-mirror). Without a monitor
+# the kiosk simply runs on the LCD. SCREEN_TRANSFORM in csi/.env: 90 or 270 if the LCD is upside down.
 T=$(grep -E '^SCREEN_TRANSFORM=' "$APP/csi/.env" 2>/dev/null | cut -d= -f2); T=${T:-90}
-if command -v wlr-randr >/dev/null; then
-  sleep 3   # let the desktop finish applying its own screen layout first
-  wlr-randr --output SPI-1 --transform "$T" --pos 0,0 --output HDMI-A-1 --mode 720x480 --scale 1.5 --pos 0,0 2>/dev/null \
-    || wlr-randr --output SPI-1 --transform "$T" --pos 0,0 --output HDMI-A-1 --custom-mode 720x480 --scale 1.5 --pos 0,0 2>/dev/null \
-    || wlr-randr --output SPI-1 --transform "$T" --pos 0,0 2>/dev/null   # no monitor connected
+HDMI=$(wlr-randr 2>/dev/null | awk '/^HDMI-A-[0-9]/{print $1; exit}')
+sleep 3   # let the desktop finish applying its own screen layout first
+wlr-randr --output SPI-1 --transform "$T" --pos 0,0 2>/dev/null
+# Open the kiosk while the LCD is the only screen, so it is placed there.
+[ -n "$HDMI" ] && wlr-randr --output "$HDMI" --off 2>/dev/null
+sleep 1
+
+BROWSER=firefox
+for b in chromium chromium-browser; do command -v "$b" >/dev/null && BROWSER=$b && break; done
+if [ "$BROWSER" = firefox ]; then
+  firefox --kiosk http://127.0.0.1:8090 &
+else
+  "$BROWSER" --user-data-dir="$HOME/.config/hybrid-kiosk" --kiosk --noerrdialogs \
+    --disable-session-crashed-bubble --disable-infobars --check-for-update-interval=31536000 \
+    --app=http://127.0.0.1:8090 &
 fi
-for browser in chromium chromium-browser; do
-  if command -v "$browser" >/dev/null; then
-    exec "$browser" --user-data-dir="$HOME/.config/hybrid-kiosk" --kiosk --noerrdialogs \
-      --disable-session-crashed-bubble --disable-infobars --check-for-update-interval=31536000 \
-      --app=http://127.0.0.1:8090
+KIOSK=$!
+sleep 8
+
+if [ -n "$HDMI" ]; then
+  wlr-randr --output "$HDMI" --on --preferred --scale 1 --pos 480,0 2>/dev/null
+  sleep 2
+  if command -v wl-mirror >/dev/null; then
+    # Mirror the LCD onto the monitor, full screen, keeping the shape (black side bars on 16:9).
+    ( while kill -0 $KIOSK 2>/dev/null; do wl-mirror --fullscreen-output "$HDMI" SPI-1 >/dev/null 2>&1; sleep 3; done ) &
   fi
-done
-exec firefox --kiosk http://127.0.0.1:8090
+fi
+wait $KIOSK
