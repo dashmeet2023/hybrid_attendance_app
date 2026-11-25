@@ -61,6 +61,9 @@ const STYLE = {
   UNKNOWN_CARD: ['info', '❓', 'New card'],
   OFFLINE: ['bad', '⚠', 'Server offline'],
   ERROR: ['bad', '⚠', 'Error'],
+  SESSION_OPENED: ['ok', '▶', 'Session opened'],
+  SESSION_CLOSED: ['info', '⏹', 'Session closed'],
+  ADMIN: ['info', '⚙', 'Administrator'],
 };
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -88,7 +91,8 @@ function render(s) {
     $('icon').className = 'icon';
     $('icon').textContent = icon;
     $('title').textContent = last.student ? last.student : label;
-    $('sub').textContent = last.outcome === 'VERIFIED' ? label : (last.message || last.uid);
+    $('sub').textContent = last.outcome === 'VERIFIED' ? label
+      : (['SESSION_OPENED', 'SESSION_CLOSED', 'ADMIN'].includes(last.outcome) ? (last.message || label) : (last.message || last.uid));
   } else {
     main.className = 'main';
     $('icon').className = 'icon pulse';

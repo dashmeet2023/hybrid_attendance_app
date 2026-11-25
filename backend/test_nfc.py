@@ -83,3 +83,40 @@ class NfcTests(test_verification.VerificationTests):
         self.approve_phone(self.student, test_verification.PHONE_A)
         self.assertEqual(self.card('04FFEEDD')['active'], 1)
 
+
+
+class StaffCardTests(test_verification.VerificationTests):
+    for _name in [n for n in dir(test_verification.VerificationTests) if n.startswith('test_')]:
+        locals()[_name] = None
+    tap = NfcTests.tap
+    card = NfcTests.card
+
+    def user_id(self, role):
+        return next(u['id'] for u in self.state(self.admin)['users'] if u['role'] == role)
+
+    def test_teacher_card_opens_and_closes_session(self):
+        token = self.sensor()
+        teacher_id = self.user_id('teacher')
+        self.assertEqual(self.admin.request('nfc/cards/assign', dict(uid='0A0B0C0D', student_id=teacher_id))[0], 200)
+        self.admin.request('nfc/cards/assign', dict(uid='04A1B2C3', student_id=self.student_id))
+        # Reader in another room: the teacher has no class there.
+        other = self.sensor('Room 204')
+        self.assertEqual(self.tap(other, '0A0B0C0D')[1]['outcome'], 'REJECTED')
+        status, result = self.tap(token, '0A0B0C0D')
+        self.assertEqual((status, result['outcome']), (200, 'SESSION_OPENED'), result)
+        sessions = [s for s in self.state(self.teacher)['sessions'] if s['status'] == 'open']
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(self.tap(token, '04A1B2C3')[1]['outcome'], 'VERIFIED')
+        status, result = self.tap(token, '0A0B0C0D')
+        self.assertEqual(result['outcome'], 'SESSION_CLOSED', result)
+        self.assertIn('1 present', result['message'])
+        self.assertFalse([s for s in self.state(self.teacher)['sessions'] if s['status'] == 'open'])
+        # Staff cards do not create attendance devices.
+        self.assertEqual(self.card('0A0B0C0D')['role'], 'teacher')
+
+    def test_admin_card(self):
+        token = self.sensor()
+        admin_id = self.user_id('admin')
+        self.admin.request('nfc/cards/assign', dict(uid='0B0B0B0B', student_id=admin_id))
+        status, result = self.tap(token, '0B0B0B0B')
+        self.assertEqual((status, result['outcome']), (200, 'ADMIN'), result)

@@ -1,4 +1,4 @@
-"""NFC card check-in from a classroom reader (ESP32-C3 + PN532 attached to the room's Pi).
+"""NFC/RFID cards tapped on a classroom reader (ESP32 + RC522/PN532 attached to the room's Pi).
 
 The reader host authenticates with the same per-room token as the CSI sensor, so a tap
 proves the card was physically at that room's reader. A card is linked to one student by
@@ -32,8 +32,18 @@ def masked(uid):
     return '…' + uid[-4:]
 
 
-def tap(engine, token, data, now=None):
+STAFF_SESSION_MINUTES = 60
+
+
+def tap(service, token, data, now=None, ip=''):
+    """Handle a card tap from a room reader.
+
+    student card -> mark present in the open session for this room (CSI rules apply when required)
+    teacher card -> open a 60-minute session for the teacher's class in this room, or close the open one
+    admin card   -> ADMIN (the Pi opens the live website for administration)
+    """
     from .service import ApiError, digest, uid as new_id, log
+    engine = service.engine
     now = time.time() if now is None else now
     if not token:
         raise ApiError('Reader token required', 401)
@@ -50,15 +60,28 @@ def tap(engine, token, data, now=None):
             conn.execute(insert(nfc_cards).values(id=new_id(), uid=card_uid, active=1, created_at=now,
                 last_seen_at=now, last_room=room))
             return {'outcome': 'UNKNOWN_CARD', 'uid': card_uid,
-                    'message': 'New card saved. Assign it to a student in Administration > NFC cards.'}
+                    'message': 'New card saved. Assign it to a person in Administration > NFC cards.'}
         conn.execute(update(nfc_cards).where(nfc_cards.c.id == card['id']).values(last_seen_at=now, last_room=room))
         if not card['student_id']:
             return {'outcome': 'UNKNOWN_CARD', 'uid': card_uid,
                     'message': 'Card is not assigned yet. Assign it in Administration > NFC cards.'}
         if not card['active']:
             return {'outcome': 'REJECTED', 'uid': card_uid, 'message': 'This card has been revoked'}
-        student = conn.execute(select(users.c.id, users.c.name, users.c.roll_no).where(
-            users.c.id == card['student_id'])).mappings().first()
+        person = conn.execute(select(users).where(users.c.id == card['student_id'])).mappings().first()
+        person = dict(person)
+        if person['role'] == 'admin':
+            log(conn, person['id'], 'admin_card_tap', room)
+            return {'outcome': 'ADMIN', 'uid': card_uid, 'student': person['name'], 'name': person['name'],
+                    'role': 'admin', 'message': 'Administrator: opening the live website'}
+        if person['role'] == 'teacher':
+            teacher = person
+        else:
+            teacher = None
+            student = person
+    if teacher is not None:
+        return teacher_tap(service, teacher, room, card_uid, now, ip)
+
+    with engine.begin() as conn:
         student_id = student['id']
         checks.append(verify.check('identity', 'pass', f"NFC card {masked(card_uid)} of {student['name']}"))
         checks.append(verify.check('reader', 'pass', f'Tapped on the reader in {room}'))
@@ -97,14 +120,46 @@ def tap(engine, token, data, now=None):
     return {'outcome': outcome, 'student': student['name'], 'uid': card_uid, 'message': message, 'checks': checks}
 
 
+def teacher_tap(service, teacher, room, card_uid, now, ip):
+    """Toggle the attendance session for the teacher's class in this room (same rules as the website)."""
+    from .service import ApiError
+    base = {'uid': card_uid, 'student': teacher['name'], 'name': teacher['name'], 'role': 'teacher'}
+    with service.engine.connect() as conn:
+        mine = conn.execute(select(courses.c.id, courses.c.code).where(courses.c.teacher_id == teacher['id'],
+            courses.c.room == room, courses.c.archived == 0).order_by(courses.c.code)).mappings().all()
+        if not mine:
+            return {**base, 'outcome': 'REJECTED', 'message': f"{teacher['name']} has no class in {room}"}
+        ids = [c['id'] for c in mine]
+        active = conn.execute(select(class_sessions.c.id, courses.c.code).join(courses, courses.c.id == class_sessions.c.course_id).where(
+            class_sessions.c.course_id.in_(ids), class_sessions.c.status.in_(['open', 'scheduled']),
+            class_sessions.c.starts_at <= now, class_sessions.c.ends_at > now)).mappings().first()
+        present = 0
+        if active:
+            present = conn.execute(select(attendance.c.id).where(attendance.c.session_id == active['id'])).all()
+            present = len(present)
+    try:
+        if active:
+            service.mutate(teacher, 'sessions/close', {'session_id': active['id']}, None, ip)
+            return {**base, 'outcome': 'SESSION_CLOSED',
+                    'message': f"{active['code']} session closed: {present} present"}
+        if len(mine) > 1:
+            return {**base, 'outcome': 'REJECTED',
+                    'message': f"Several of your classes use {room}; open the session on the website"}
+        service.mutate(teacher, 'sessions/open', {'course_id': mine[0]['id'], 'minutes': STAFF_SESSION_MINUTES}, None, ip)
+        return {**base, 'outcome': 'SESSION_OPENED',
+                'message': f"{mine[0]['code']} session opened for {STAFF_SESSION_MINUTES} min"}
+    except ApiError as error:
+        return {**base, 'outcome': 'REJECTED', 'message': error.message}
+
+
 def assign(conn, admin, data, now=None):
     """Link a card (seen by a reader, or typed in by UID) to a student; one active card per student."""
     from .service import ApiError, digest, uid as new_id, log, field
     now = time.time() if now is None else now
-    student_id = field(data, 'student_id', 40)
+    student_id = field(data, 'student_id', 40)   # the person the card belongs to (student, teacher or admin)
     student = conn.execute(select(users).where(users.c.id == student_id)).mappings().first()
-    if not student or student['role'] != 'student':
-        raise ApiError('Choose a student account')
+    if not student or student['role'] not in ('student', 'teacher', 'admin'):
+        raise ApiError('Choose an account')
     if data.get('card_id'):
         card = conn.execute(select(nfc_cards).where(nfc_cards.c.id == field(data, 'card_id', 40))).mappings().first()
         if not card:
@@ -116,6 +171,12 @@ def assign(conn, admin, data, now=None):
             card_id = new_id()
             conn.execute(insert(nfc_cards).values(id=card_id, uid=card_uid, active=1, created_at=now))
             card = conn.execute(select(nfc_cards).where(nfc_cards.c.id == card_id)).mappings().first()
+    if student['role'] != 'student':
+        # Staff cards open/close sessions (teacher) or open administration (admin); no attendance device needed.
+        conn.execute(update(nfc_cards).where(nfc_cards.c.student_id == student_id, nfc_cards.c.id != card['id']).values(active=0))
+        conn.execute(update(nfc_cards).where(nfc_cards.c.id == card['id']).values(student_id=student_id, device_id=None, active=1))
+        log(conn, admin['id'], 'nfc_card_assigned', card['id'])
+        return {'message': f"Card {masked(card['uid'])} assigned to {student['name']} ({student['role']})"}
     # Attendance rows reference a device; a card gets its own device record (status 'card',
     # so approving or revoking phones never touches it and it stays out of the phone list).
     token_hash = digest('nfc:' + card['uid'])
@@ -146,6 +207,6 @@ def revoke(conn, admin, data):
 
 def card_list(conn):
     rows = conn.execute(select(nfc_cards.c.id, nfc_cards.c.uid, nfc_cards.c.student_id, nfc_cards.c.active,
-        nfc_cards.c.created_at, nfc_cards.c.last_seen_at, nfc_cards.c.last_room, users.c.name, users.c.email).outerjoin(
+        nfc_cards.c.created_at, nfc_cards.c.last_seen_at, nfc_cards.c.last_room, users.c.name, users.c.email, users.c.role).outerjoin(
         users, users.c.id == nfc_cards.c.student_id).order_by(nfc_cards.c.created_at.desc())).mappings().all()
     return [dict(r) for r in rows]

@@ -7,6 +7,8 @@ Every card tap is sent to the attendance server, which decides the result:
   PENDING       session needs the CSI room check and the sensor is not sure yet: tap again
   REJECTED      no open session for this student here, card revoked, room empty (CSI) ...
   UNKNOWN_CARD  new card: the admin assigns it in Administration > NFC cards
+  SESSION_OPENED / SESSION_CLOSED   teacher card: toggles the session for the teacher's class in this room
+  ADMIN         administrator card: opens the live website on the Pi's screen
 The result is sent back to the reader (LED pattern) and shown on the touchscreen kiosk.
 
 Settings come from csi/.env (same room token as the CSI sensor on this Pi):
@@ -138,7 +140,7 @@ class Server:
         self.http.headers.update({"Authorization": "Bearer " + token})
 
     def tap(self, uid):
-        """Return (outcome, message, student)."""
+        """Return (outcome, message, name of the card's owner)."""
         try:
             r = self.http.post(self.url, json={"uid": uid}, timeout=10)
         except requests.RequestException as e:
@@ -189,16 +191,20 @@ def open_website_window():
 
 
 def on_card(ser, server, uid):
-    close_website_window()
+    close_website_window()   # any tap brings the kiosk back to the front
     outcome, message, student = server.tap(uid)
     print(f"[{outcome}] {uid}  {message}", flush=True)
     log_tap(uid, outcome, message)
     with STATE.lock:
         STATE.taps.appendleft({"uid": uid, "outcome": outcome, "message": message,
                                "student": student, "at": time.time()})
+    if outcome == "ADMIN":
+        open_website_window()   # administrator card: open the live website on the Pi's screen
     # Show the decision on the reader's LED: VERIFIED = long flash, PENDING = 2 slow,
     # UNKNOWN_CARD = 3 medium, REJECTED = 6 fast, OFFLINE/ERROR = 10 very fast.
-    send(ser, "RESULT " + outcome)
+    # Teacher/admin card actions that succeeded are shown like VERIFIED.
+    led = "VERIFIED" if outcome in ("SESSION_OPENED", "SESSION_CLOSED", "ADMIN") else outcome
+    send(ser, "RESULT " + led)
 
 
 def run(port, server):

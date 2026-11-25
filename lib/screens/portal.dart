@@ -460,9 +460,9 @@ class _PortalScreenState extends State<PortalScreen> {
     }
   }
 
-  Map<String, String> studentOptions() => {
-    for (final u in store.list('users').where((u) => u['role'] == 'student'))
-      '${u['id']}': '${u['name']} · ${u['roll_no'] ?? ''} · ${u['email']}',
+  Map<String, String> peopleOptions() => {
+    for (final u in store.list('users'))
+      '${u['id']}': '${u['name']} · ${u['role']} · ${u['email']}',
   };
 
   Future<bool> confirm(String text) async =>
@@ -1353,9 +1353,10 @@ class _PortalScreenState extends State<PortalScreen> {
       ]),
       panel('NFC cards', [
         const Text(
-          'Students tap their card on the classroom reader (ESP32-C3 + PN532 on the room\'s Pi, using that room\'s sensor token). '
-          'A new card appears here after its first tap; assign it to a student. The tap marks the student present in the open session for that room. '
-          'If the session requires the CSI check, the room sensor must also report PRESENT.',
+          'Cards are tapped on the classroom reader (ESP32 + RC522 on the room\'s Pi, using that room\'s sensor token). '
+          'A new card appears here after its first tap; assign it to a person. Student card: marks the student present in the open '
+          'session for that room (if the session requires the CSI check, the room sensor must also report PRESENT). Teacher card: '
+          'opens a 60-minute session for the teacher\'s class in that room, or closes the open one. Admin card: opens the live website on the Pi.',
         ),
         const SizedBox(height: 12),
         Align(
@@ -1364,7 +1365,7 @@ class _PortalScreenState extends State<PortalScreen> {
             'Add card by UID',
             () => actionForm('Add NFC card', 'nfc/cards/assign', [
               const FieldSpec('uid', 'Card UID, e.g. 04A1B2C3D4E5F6'),
-              FieldSpec('student_id', 'Student', options: studentOptions()),
+              FieldSpec('student_id', 'Person', options: peopleOptions()),
             ]),
             icon: Icons.nfc,
           ),
@@ -1373,7 +1374,7 @@ class _PortalScreenState extends State<PortalScreen> {
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: Text(
-              '${card['uid']} · ${card['student_id'] == null ? 'Unassigned' : '${card['name']} (${card['email']})'}',
+              '${card['uid']} · ${card['student_id'] == null ? 'Unassigned' : '${card['name']} · ${card['role']} (${card['email']})'}',
             ),
             subtitle: Text(
               '${card['active'] == 1 ? 'Active' : 'Revoked'} · '
@@ -1395,8 +1396,8 @@ class _PortalScreenState extends State<PortalScreen> {
                           [
                             FieldSpec(
                               'student_id',
-                              'Student',
-                              options: studentOptions(),
+                              'Person',
+                              options: peopleOptions(),
                             ),
                           ],
                           {'card_id': card['id']},
