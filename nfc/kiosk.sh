@@ -20,6 +20,17 @@ for i in $(seq 1 30); do
   sleep 1
 done
 xset s off -dpms 2>/dev/null   # keep the screen on (X11); harmless on Wayland
+
+# Rotate the 3.5" LCD (SPI-1) to landscape and mirror it on the HDMI monitor: the monitor runs at
+# 720x480 with scale 1.5 (= 480x320, same shape) at the same position, so both show the same picture.
+# Change SCREEN_TRANSFORM in csi/.env (90 or 270) if the picture is upside down.
+T=$(grep -E '^SCREEN_TRANSFORM=' "$APP/csi/.env" 2>/dev/null | cut -d= -f2); T=${T:-90}
+if command -v wlr-randr >/dev/null; then
+  sleep 3   # let the desktop finish applying its own screen layout first
+  wlr-randr --output SPI-1 --transform "$T" --pos 0,0 --output HDMI-A-1 --mode 720x480 --scale 1.5 --pos 0,0 2>/dev/null \
+    || wlr-randr --output SPI-1 --transform "$T" --pos 0,0 --output HDMI-A-1 --custom-mode 720x480 --scale 1.5 --pos 0,0 2>/dev/null \
+    || wlr-randr --output SPI-1 --transform "$T" --pos 0,0 2>/dev/null   # no monitor connected
+fi
 for browser in chromium chromium-browser; do
   if command -v "$browser" >/dev/null; then
     exec "$browser" --user-data-dir="$HOME/.config/hybrid-kiosk" --kiosk --noerrdialogs \

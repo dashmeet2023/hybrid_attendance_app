@@ -22,6 +22,7 @@
 #include <WebServer.h>
 #include <time.h>
 #include "esp_wifi.h"
+#include "esp_timer.h"
 #include "ping/ping_sock.h"
 #include "freertos/queue.h"
 
@@ -36,6 +37,7 @@ const char *WEB_PASS  = "admin12345";
 #define MODE_RAW     1
 #define START_MODE   MODE_SUMMARY              // MODE_RAW for the Raspberry Pi
 #define PING_INTERVAL_MS 10                    // 100 packets per second
+#define MIN_GAP_US 9000                        // at most ~110 CSI packets per second to the USB link
 #define TZ_OFFSET_S  19800                     // IST (UTC+5:30), for log timestamps
 #define MOTION_THRESHOLD 8.0                   // dashboard "movement" hint only; the Pi model decides presence
 // ------------------------------------------
@@ -105,7 +107,13 @@ static void logEvent(const String &msg) {
 
 // Runs in the Wi-Fi task: keep it short, copy the packet and return.
 static void csiCallback(void *ctx, wifi_csi_info_t *info) {
-  if (!info || !info->buf || memcmp(info->mac, routerMac, 6) != 0) return;   // only the router's replies
+  if (!info || !info->buf || memcmp(info->mac, routerMac, 6) != 0) return;   // only the router's frames
+  // The router also sends beacons/other frames: keep at most one packet per MIN_GAP_US so the
+  // USB link carries a steady ~100 lines/s (what the Pi model was designed for).
+  static int64_t lastUs = 0;
+  int64_t nowUs = esp_timer_get_time();
+  if (nowUs - lastUs < MIN_GAP_US) return;
+  lastUs = nowUs;
   CsiPacket p;
   const wifi_pkt_rx_ctrl_t &rx = info->rx_ctrl;
   p.rssi = rx.rssi; p.noise_floor = rx.noise_floor; p.rate = rx.rate; p.sig_mode = rx.sig_mode;
@@ -414,9 +422,12 @@ static void handleCommand(String cmd) {
 void setup() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, HIGH);
+#if ARDUINO_USB_CDC_ON_BOOT
+  Serial.setTxBufferSize(16384);     // CSI lines are ~500 bytes at ~100/s: buffer them, never cut them
+#endif
   Serial.begin(921600);
 #if ARDUINO_USB_CDC_ON_BOOT
-  Serial.setTxTimeoutMs(0);          // never stall when no computer is reading the USB port
+  Serial.setTxTimeoutMs(20);         // wait briefly for the Pi instead of dropping half a line
 #endif
   delay(1500);
   Serial.println("\n=== ESP32-C3 CSI sensor (Arduino) ===");
@@ -458,7 +469,7 @@ void loop() {
   while (xQueueReceive(csiQueue, &p, 0) == pdTRUE) {
     totalPackets++;
     addStats(p);
-    if (mode == MODE_RAW) printRaw(p);
+    if (mode == MODE_RAW && Serial) printRaw(p);   // Serial is false when no computer has the USB port open
   }
   tickSecond();
   delay(1);

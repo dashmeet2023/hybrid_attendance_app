@@ -61,3 +61,5 @@ csi/logs/
 csi/venv/
 firmware/sdkconfig.wifi
 firmware/.esp-csi/
+nfc/taps.csv
+nfc/reader.log
